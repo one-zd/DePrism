@@ -145,8 +145,8 @@ If you use this code, please cite:
 ```bibtex
 @article{YourName2025PrivacyControlT2I,
   title={Not a Pandora’s Box Anymore: Preserving Privacy in Controllable Text-to-Image Inference},
-  author={Your Name and Others},
-  journal={Proceedings of ...},
+  author={Zhangdong Wang, Tongqing Zhou, Zhihuang Liu, Jiaohua Qin and Zhiping Cai},
+  journal={Submit to TIP},
   year={2025}
 }
 ```
