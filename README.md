@@ -58,7 +58,7 @@ pip install torch torchvision transformers lpips scikit-image pandas tqdm openpy
 
 ## 📁 Dataset Preparation | 数据准备
 
-Your dataset Excel file (e.g. `multigen_100_key4.xlsx`) should include:
+Your dataset Excel file (e.g. `multigen.xlsx`) should include:
 
 | case_number | image_name | prompt | sensitive_words | category | style_prompt |
 |--------------|-------------|--------|-----------------|-----------|---------------|
@@ -72,7 +72,7 @@ dataset/
     │   ├── img_001.png
     │   ├── img_002.png
     │   └── ...
-    └── multigen_100_key4.xlsx
+    └── multigen.xlsx
 ```
 
 ---
