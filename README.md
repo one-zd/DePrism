@@ -15,16 +15,22 @@ We propose a **privacy-preserving controllable generation pipeline**, integratin
 - 📊 自动化图像质量评估（PSNR, SSIM, LPIPS, CLIP, NIMA, FID）
 
 ---
+---
 
 ## 🧱 Repository Structure | 仓库结构
 
 ```
-├── run_all_dataset.py       # 批量生成任务脚本（支持重试与日志）
-├── evaluate_batch.py        # 自动化图像质量评估
-├── run_all.py               # 图像生成核心函数（由 run_all_dataset 调用）
-├── NIMA/                    # 图像美学质量模型（NIMA）
-├── dataset/                 # 数据集示例（Excel + 原始图像）
-└── outputs/                 # 生成结果保存目录
+├── scripts/
+│   ├── run_all_dataset.py              # 批量生成任务（支持重试与日志）
+│   ├── run_all.py                      # 单样本 DePrism 核心流程
+│   ├── evaluate_comprehensive.py       # 统一评测器
+│   ├── controlnet.py                   # 可控生成方法接口
+│   ├── canny_fusion.py                 # 伪装边缘组合
+│   └── final_image_fusion.py           # 客户端图像融合
+├── NIMA/                               # NIMA 模型定义与 checkpoint
+├── dataset/                            # Excel/CSV 元数据和原始图像
+├── outputs_dataset/                    # 各方法生成结果
+└── openai/clip-vit-large-patch14/      # 本地 CLIP 模型
 ```
 
 ---
@@ -32,14 +38,18 @@ We propose a **privacy-preserving controllable generation pipeline**, integratin
 ## ⚙️ Environment Setup | 环境配置
 
 ### 1️⃣ Create environment | 创建环境
+
 ```bash
-conda create -n ppi_control python=3.10
-conda activate ppi_control
+conda env create -f scripts/environment.yml
+conda activate control
 ```
 
-### 2️⃣ Install dependencies | 安装依赖
+`environment.yml` 保存的论文实验环境基于 Python 3.8、PyTorch 1.12 和 CUDA 11.3。若只安装评测依赖，可使用：
+
+### 2️⃣ Install evaluation dependencies | 安装评测依赖
+
 ```bash
-pip install torch torchvision timm transformers lpips scikit-image pandas tqdm openpyxl torchmetrics pillow
+pip install torch torchvision transformers lpips scikit-image pandas tqdm openpyxl torchmetrics torch-fidelity pillow tabulate
 ```
 
 > ⚠️ 若使用 GPU，请根据 CUDA 版本安装对应的 PyTorch。
@@ -72,7 +82,14 @@ dataset/
 Run the main generation script:
 
 ```bash
-python run_all_dataset.py   --excel_path dataset/multigen-100/multigen_100_key4.xlsx   --dataset_path dataset/multigen-100/all   --output_root outputs/ppi_control_results   --method controlnet   --scale 10   --steps 50   --seed 3
+python scripts/run_all_dataset.py \
+  --excel_path dataset/multigen-100/multigen_100_key4.xlsx \
+  --dataset_path dataset/multigen-100/all \
+  --output_root outputs_dataset/outputs_controlnetplus_key4 \
+  --method controlnet \
+  --scale 10 \
+  --steps 50 \
+  --seed 3
 ```
 
 ### ✅ Features | 特性
@@ -83,58 +100,156 @@ python run_all_dataset.py   --excel_path dataset/multigen-100/multigen_100_key4.
 
 生成结果结构：
 ```
-outputs/ppi_control_results/
+outputs_dataset/outputs_controlnetplus_key4/
 └── img_001/
-    ├── final_fused_img.png
-    ├── canny_mask.png
-    └── ...
+    ├── background_canny.png
+    ├── controlnet_background.png
+    ├── controlnet_camouflage_<keyword>.png
+    ├── controlnet_gt.png
+    └── final_fused_img.png
 ```
 
 ---
 
-## 📊 Evaluation | 自动化评估
+## 📊 Comprehensive Evaluation | 全面统一评测
 
-Run the evaluation script after generation:
+使用 `scripts/evaluate_comprehensive.py` 对 Excel/CSV 元数据执行批量评测。评测器支持分类汇总、多方法比较、L2-normalized CLIP embedding 余弦相似度和 NIMA-5C，并保存完整的逐样本结果与实验日志。
+
+### 单方法评测
+
+下面的命令同时评测最终 DePrism 输出相对于原始图像和 Standard 输出的质量：
 
 ```bash
-python evaluate_batch.py   --excel_path dataset/multigen-100/multigen_100_key4.xlsx   --generated_dir outputs/ppi_control_results   --ref_dir dataset/multigen-100/all   --generated_name final_fused_img   --output_csv eval_results.csv
+python scripts/evaluate_comprehensive.py \
+  --metadata dataset/multigen-100/multigen_100.xlsx \
+  --ref-dir dataset/multigen-100/all \
+  --generated-dir outputs_dataset/outputs_controlnet \
+  --method-name ControlNet \
+  --generated-name final_fused_img.png \
+  --comparison-name controlnet_gt.png \
+  --comparison-label standard \
+  --output-dir scripts/comprehensive_evaluation \
+  --output-prefix controlnet_final
 ```
 
-### 📈 Metrics | 评估指标
+### 多方法统一评测
 
-| Metric | Description |
-|:--------|:-------------|
-| **PSNR** | Peak Signal-to-Noise Ratio |
-| **SSIM** | Structural Similarity Index |
-| **LPIPS** | Perceptual similarity (VGG-based) |
-| **CLIP Score** | Text-image alignment |
-| **NIMA** | Aesthetic score |
-| **FID** | Fréchet Inception Distance |
-| **Subjective Score** | Weighted fusion of NIMA + CLIP + LPIPS |
+使用多个 `--run LABEL=PATH` 可在一次运行中评测和汇总不同方法：
 
-Output files:
-- `eval_results.csv` → 每张图片的指标结果  
-- `*_summary.csv` → 各类别与全局平均指标  
-
----
-
-## 📊 Example Output | 示例输出
-
-```
-📐 Global FID Score: 12.3478
-✅ Saved evaluation results to: outputs/final_fused_img_eval_results.csv
-📊 Saved category-wise summary to: outputs/final_fused_img_summary.csv
+```bash
+python scripts/evaluate_comprehensive.py \
+  --metadata dataset/multigen-100/multigen_100.xlsx \
+  --ref-dir dataset/multigen-100/all \
+  --run ControlNet=outputs_dataset/outputs_controlnet \
+  --run T2I-Adapter=outputs_dataset/outputs_t2i_adapter \
+  --run Uni-ControlNet=outputs_dataset/outputs_unicontrolnet \
+  --run ControlNet++=outputs_dataset/outputs_controlnet_plusplus \
+  --generated-name final_fused_img.png \
+  --comparison-name controlnet_gt.png \
+  --output-dir scripts/comprehensive_evaluation \
+  --output-prefix table2_methods
 ```
 
----
+### 图像对与指标命名
+
+评测器明确区分两套图像对，避免将隐私和效用口径混淆：
+
+| 输出列前缀 | 图像对 | 常见用途 |
+| --- | --- | --- |
+| `ref_*`、`clip_i_ref` | 生成图 vs 原始参考图 | 最终图像效用或输入侧隐私 |
+| `standard_*`、`clip_i_standard` | 生成图 vs `--comparison-name` | DePrism vs Standard 输出一致性 |
+| `clip_t_prompt` | 生成图 vs 原始 prompt | 文本—图像语义对齐 |
+| `clip_t_prompt_style` | 生成图 vs style prompt + prompt | 风格条件下的语义对齐 |
+
+`--comparison-name` 和 `--comparison-label` 可用于任意额外图像对。例如评测最终图像与上下文分支时，可使用：
+
+```bash
+--comparison-name controlnet_background.png --comparison-label context
+```
+
+### 评估指标
+
+| Metric | Description | Direction |
+| --- | --- | --- |
+| **PSNR** | 像素级峰值信噪比 | 相似性任务通常越高越好 |
+| **SSIM** | 结构相似性 | 相似性任务通常越高越好 |
+| **LPIPS** | VGG 感知距离 | 相似性任务通常越低越好 |
+| **FID** | 数据集级生成/参考分布距离 | 越低越好；不应解释单样本 FID |
+| **CLIP-T** | L2-normalized text/image embeddings 的余弦相似度 | 语义对齐通常越高越好 |
+| **CLIP-I** | 两幅图像的归一化 CLIP embeddings 余弦相似度 | 方向取决于具体隐私/效用图像对 |
+| **NIMA-5C** | ImageNet 归一化、五裁剪后的美学分布与均值 | 越高通常表示美学质量越好 |
+
+评测器分别报告每项标准指标，不使用人为加权的综合分数。
+
+### NIMA 评测模式
+
+默认使用 NIMA-5C：
+
+```bash
+--nima-variants five_crop_norm
+```
+
+若要执行预处理审计，可同时计算四个版本：
+
+```bash
+--nima-variants \
+  no_norm_center_crop \
+  center_crop_norm \
+  resize_direct_norm \
+  five_crop_norm
+```
+
+可通过 `--nima-targets` 控制 NIMA 的计算对象：
+
+```bash
+--nima-targets generated reference comparison
+```
+
+### 输出文件
+
+以 `--output-prefix comprehensive` 为例，评测器生成：
+
+| 文件 | 内容 |
+| --- | --- |
+| `comprehensive_per_sample.csv` | 每个样本、每个方法的完整指标 |
+| `comprehensive_summary.csv` | 按方法和类别统计的均值、标准差及 FID |
+| `comprehensive_missing.csv` | 缺失文件或多重 glob 匹配记录 |
+| `comprehensive_report.md` | 可读的实验配置、指标说明与汇总表 |
+| `comprehensive_log.json` | 路径、模型、版本、样本数量和输出文件日志 |
+
+缺失图像默认记录后跳过；需要严格复现时可使用：
+
+```bash
+--missing-policy error
+```
+
+模型默认只从本地读取。仅在明确需要联网下载 CLIP 时使用：
+
+```bash
+--allow-model-download
+```
+
+### 快速检查与指标开关
+
+可以关闭较慢的模型指标，用于检查元数据和图像路径：
+
+```bash
+python scripts/evaluate_comprehensive.py \
+  --metadata dataset/multigen-100/multigen_test.xlsx \
+  --ref-dir dataset/multigen-100/all \
+  --generated-dir outputs_dataset/outputs_controlnet \
+  --generated-name final_fused_img.png \
+  --limit 2 \
+  --skip-clip --skip-nima --skip-lpips --skip-fid
+```
 
 ## 🧮 Model Dependencies | 模型依赖
 
 - **CLIP:** `openai/clip-vit-large-patch14`
-- **NIMA:** VGG16 backbone, load from `NIMA/snapshots/epoch-82.pth`
+- **NIMA:** VGG16 backbone，默认 checkpoint 为 `NIMA/snapshots/epoch-82.pth`
 - **Control methods:** integrated in `run_all.py`
 
-请根据本地路径修改 `evaluate_batch.py` 中模型加载位置。
+评测器支持通过 `--clip-model` 和 `--nima-ckpt` 指定路径；相对路径以仓库根目录解析，不需要修改源代码。
 
 ---
 
